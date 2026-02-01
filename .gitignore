@@ -1,0 +1,60 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+
+# Credentials & Sensitive data
+mycreds.txt
+token.json
+credentials.json
+client_secrets.json
+
+# Local Caches
+ai_cache.json
+dummy.pdf
+dummy_idx.pdf
+
+# Generated Reports (Large files)
+*.pdf
+!VES_Logo_Sample.pdf # If there's a sample you WANT to keep, but usually ignore all
+
+# Images (Temporary)
+img_*.png
+ves_logo.png
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+frontend/out/
+frontend/build/
+backend/venv/
+backend/__pycache__/

@@ -1,3 +1,4 @@
+
 import pandas as pd
 import re
 import os
@@ -26,9 +27,9 @@ load_dotenv()
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-excel_file = r"F:\VESIT\Internship\Criteria 5 CMPN Data 2024-25 .xlsx"
+excel_file = r"data\Criteria 5.1.3 CMPN Data 2024-25.xlsx"
 sheet_name = "5.1.3"
-pdf_output = "NAAC Criteria 5.1.3.pdf"
+pdf_output = "NAAC_Criteria_5.1.3.pdf"
 logo_file = "vesit.png"  # Make sure this file exists
 
 

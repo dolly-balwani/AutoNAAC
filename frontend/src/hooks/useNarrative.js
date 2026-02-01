@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { generateReport } from '../services/api';
 
 /**
  * Initial narrative content (mock AI-generated text)
@@ -45,22 +46,21 @@ export function useNarrative() {
   }, []);
 
   /**
-   * Regenerate narrative (placeholder for API call)
+   * Regenerate narrative using the AI backend
+   * @param {string} criterion - The NAAC criterion to generate report for
    */
-  const regenerate = useCallback(async () => {
+  const regenerate = useCallback(async (criterion = '5.1.3 Capacity building and skills enhancement initiatives') => {
     setIsLoading(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const regeneratedContent = `[Regenerated Content]
-
-${INITIAL_NARRATIVE}
-
-Additional sections have been regenerated based on the latest evidence and criteria selections.`;
-    
-    setContent(regeneratedContent);
-    setIsLoading(false);
-    setIsSaved(false);
+    try {
+      const response = await generateReport(criterion);
+      setContent(response.report);
+      setIsSaved(false);
+    } catch (error) {
+      console.error('Failed to generate report:', error);
+      // Keep existing content on error
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   /**
@@ -70,13 +70,13 @@ Additional sections have been regenerated based on the latest evidence and crite
     setIsLoading(true);
     // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 1500));
-    
+
     // Add some improvements to the content
     const improvedContent = content + `
 
 Enhanced Quality Metrics:
 The institution has achieved significant improvements in key performance indicators. Pass percentage has increased by 3% over the assessment period. Research output has shown a 25% increase in publications. Placement statistics reflect an industry-ready workforce with 78% placement rate.`;
-    
+
     setContent(improvedContent);
     setIsLoading(false);
     setIsSaved(false);
@@ -89,7 +89,7 @@ The institution has achieved significant improvements in key performance indicat
     setIsLoading(true);
     // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 500));
-    
+
     setContent(textContent);
     setIsSaved(true);
     setLastSaved(new Date().toLocaleTimeString());
