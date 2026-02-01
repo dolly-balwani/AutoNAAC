@@ -1,0 +1,11 @@
+NAAC CRITERION: 1.3.1 Integration of Cross-cutting issues
+
+The institutions, Indian Institute of Information Technology Sri City (IIITS) and Bhagwan Parshuram Institute of Technology (BPIT), ensure the comprehensive integration of cross-cutting issues—Gender Equity, Environmental Sustainability, and Human Values and Professional Ethics—into the academic curriculum, fulfilling the requirements for holistic student development.
+
+**Human Values and Ethics:** Core professional ethics are mandated across all B.Tech programs. At IIITS, integration is achieved through specialized Program Specific Outcomes (PSOs); for example, the syllabus for "Artificial Intelligence and Machine Learning Governance" (AI 405) includes dedicated modules on data ethics, algorithmic bias, and Intellectual Property Rights (IPR). BPIT integrates these principles via a mandatory 3-credit course, "Professional Ethics and Organizational Behavior," emphasizing corporate social responsibility and integrity in engineering practice.
+
+**Environmental Sustainability:** Principles of sustainability are woven into core technical and engineering coursework. IIITS addresses Green IT via the "Sustainable Cloud Computing" module, focusing on energy-efficient data center operations. Similarly, BPIT includes practical components related to pollution control and resource management within the mandatory "Environmental Science and Engineering" subject.
+
+**Gender Equity:** Integration is achieved both structurally and within the soft skills curriculum. While policies ensure a gender-sensitive campus, the academic framework mandates orientation sessions and workshops integrated within the "Professional Communication and Soft Skills" course (IIITS/BPIT), using case studies on workplace diversity, POSH regulations, and equitable leadership.
+
+Specific course syllabi, module descriptions, and detailed integration matrices supporting these claims are documented and verifiable in the respective institutional Annual Quality Assurance Reports (AQARs) and official curricular Appendices.
