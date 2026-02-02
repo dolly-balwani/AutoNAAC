@@ -27,7 +27,7 @@ try:
     from langchain_core.output_parsers import JsonOutputParser
     from pydantic import BaseModel, Field
     from openpyxl import load_workbook
-    from pypdf import PdfReader
+    from pypdf import PdfReader, PdfWriter
 except ImportError as e:
     print(f"Missing dependency: {e}")
     sys.exit(1)
@@ -55,9 +55,14 @@ def get_drive():
         # TRY TO USE LOCAL AUTH WITHOUT BROWSER IF POSSIBLE
         gauth.LoadCredentialsFile("mycreds.txt")
         if gauth.credentials is None:
+            # First time auth
             gauth.LocalWebserverAuth()
         elif gauth.access_token_expired:
-            gauth.Refresh()
+            try:
+                gauth.Refresh()
+            except:
+                # If refresh fails, redo auth
+                gauth.LocalWebserverAuth()
         else:
             gauth.Authorize()
         gauth.SaveCredentialsFile("mycreds.txt")
@@ -66,20 +71,55 @@ def get_drive():
         print(f"Drive Auth Error: {e}")
         return None
 
-def download_images(drive, url, folder_prefix):
+def download_drive_content(drive, urls, folder_prefix):
+    """
+    Tries to find images and PDFs from a list of URLs.
+    """
     images = []
-    if not drive or not url: return images
-    m = re.search(r'([a-zA-Z0-9_-]{25,})', url)
-    if not m: return images
-    fid = m.group(1)
-    try:
-        file_list = drive.ListFile({'q': f"'{fid}' in parents and trashed=false and mimeType contains 'image/'"}).GetList()
-        for f in file_list[:2]:
-            fname = f"{folder_prefix}_{f['title'][:10].replace(' ', '_')}.jpg"
-            f.GetContentFile(fname)
-            images.append(fname)
-    except: pass
-    return images
+    pdf_path = None
+    if not drive or not urls: return images, None, False
+    
+    # Process each link found in the row
+    for link_idx, url in enumerate(urls):
+        if not url or not isinstance(url, str): continue
+        m = re.search(r'([a-zA-Z0-9_-]{25,})', url)
+        if not m: continue
+        fid = m.group(1)
+        
+        print(f"      🔍 Checking Drive Link {link_idx+1}: {fid[:10]}...")
+        try:
+            f_meta = drive.CreateFile({'id': fid})
+            f_meta.FetchMetadata()
+            
+            # If it's a direct PDF
+            if f_meta['mimeType'] == 'application/pdf':
+                if not pdf_path:
+                    pdf_path = f"{folder_prefix}_doc_{link_idx}.pdf"
+                    print(f"      📥 Downloading PDF: {f_meta['title']}")
+                    f_meta.GetContentFile(pdf_path)
+                continue
+
+            # If it's a folder, list its contents
+            query = f"'{fid}' in parents and trashed=false"
+            children = drive.ListFile({'q': query}).GetList()
+            
+            for child in children:
+                mtype = child['mimeType']
+                if 'image/' in mtype and len(images) < 4:
+                    fname = f"{folder_prefix}_img_{link_idx}_{len(images)}.jpg"
+                    print(f"      📸 Downloading Image: {child['title']}")
+                    child.GetContentFile(fname)
+                    images.append(fname)
+                elif mtype == 'application/pdf' and not pdf_path:
+                    pdf_path = f"{folder_prefix}_doc_{link_idx}.pdf"
+                    print(f"      📥 Downloading PDF (from folder): {child['title']}")
+                    child.GetContentFile(pdf_path)
+                    
+        except Exception as e:
+            print(f"      ⚠️ Drive Link Error: {e}")
+            
+    is_pdf = pdf_path is not None
+    return images, pdf_path, is_pdf
 
 def generate_narrative(row_data: str):
     try:
@@ -114,34 +154,13 @@ Provide detailed responses for:
 
 class VESPDF:
     def __init__(self, filename):
-        self.doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=0.75*inch, rightMargin=0.75*inch, topMargin=0.75*inch, bottomMargin=0.75*inch)
+        # Increased topMargin to accommodate the logo header comfortably
+        self.doc = SimpleDocTemplate(filename, pagesize=A4, 
+                                   leftMargin=0.75*inch, rightMargin=0.75*inch, 
+                                   topMargin=2.8*inch, bottomMargin=0.75*inch)
         self.styles = getSampleStyleSheet()
         self.story = []
         self._setup_styles()
-
-    def _setup_styles(self):
-        # Header - Big Red with leading
-        self.s_header = ParagraphStyle(
-            'H', 
-            fontSize=24, 
-            textColor=VES_RED, 
-            alignment=1, 
-            fontName='Times-Bold',
-            leading=28
-        )
-        # Event Title - Medium Red with leading
-        self.s_event_title = ParagraphStyle(
-            'ET', 
-            fontSize=18, 
-            textColor=VES_RED, 
-            fontName='Times-Bold', 
-            spaceBefore=12,
-            spaceAfter=12,
-            leading=22
-        )
-        self.s_sub = ParagraphStyle('S', fontSize=18, alignment=1, fontName='Times-Roman', underline=True, leading=22)
-        self.s_body = ParagraphStyle('B', fontSize=11, leading=14, alignment=4, fontName='Times-Roman', spaceAfter=6)
-        self.s_label = ParagraphStyle('L', parent=self.s_body, fontName='Times-Bold', spaceBefore=8, textColor=VES_RED)
 
     def _setup_styles(self):
         # Header - Big Red
@@ -167,36 +186,29 @@ class VESPDF:
         self.s_aff = ParagraphStyle('A', fontSize=9, alignment=1, leading=11)
         self.s_body = ParagraphStyle('B', fontSize=11, leading=14, alignment=4, fontName='Times-Roman', spaceAfter=8)
         self.s_label = ParagraphStyle('L', parent=self.s_body, fontName='Times-Bold', spaceBefore=10, textColor=VES_RED)
-        # Index Item Style (Enforce wrapping)
+        self.s_caption = ParagraphStyle('Cap', fontSize=9, alignment=1, fontName='Times-Italic', spaceBefore=4, spaceAfter=8)
         self.s_idx_item = ParagraphStyle('IdxItem', fontSize=10, leading=12, alignment=0, fontName='Times-Roman')
 
-    def add_cover(self, events, event_pages=None):
-        # Use a 3-column table for logo on left but text centered in middle
-        logo = None
+    def footer(self, canvas, doc):
+        canvas.saveState()
+        canvas.setFont('Times-Roman', 9)
+        canvas.drawRightString(A4[0] - 0.75*inch, 0.5*inch, f"Page {doc.page}")
+        canvas.restoreState()
+
+    def header(self, canvas, doc):
+        canvas.saveState()
         if os.path.exists("ves_logo.png"):
-            try:
-                logo = Image("ves_logo.png", width=1.1*inch, height=1.1*inch)
-            except: pass
+            # Centering 6.5in banner: x = (8.27 - 6.5)/2 = 0.885
+            # Lowering Y significantly to A4[1] - 2.6 to avoid any top cut-off
+            canvas.drawImage("ves_logo.png", 0.885*inch, A4[1] - 2.6*inch, width=6.5*inch, preserveAspectRatio=True, mask='auto')
+        canvas.restoreState()
 
-        center_text = [
-            [Paragraph("<b>Vivekanand Education Society's</b>", self.s_header)],
-            [Paragraph("Institute of Technology", self.s_sub)],
-            [Paragraph("(Affiliated to University of Mumbai, Approved by AICTE & Recognized by Govt. of Maharashtra)", self.s_aff)]
-        ]
-        text_table = Table(center_text, colWidths=[5.0*inch])
-        text_table.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
-
-        # Logo on left, Text in middle, Empty spacer on right to keep text centered
-        header_table = Table([[logo, text_table, Spacer(1.2*inch, 1.1*inch)]], 
-                           colWidths=[1.2*inch, 5.0*inch, 1.2*inch])
-        header_table.setStyle(TableStyle([
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('LEFTPADDING', (0,0), (-1,-1), 0),
-            ('RIGHTPADDING', (0,0), (-1,-1), 0),
-        ]))
+    def add_cover(self, events, event_pages=None):
+        # The cover doesn't get the header, so we just add spacer for where header would be
+        self.story.append(Spacer(1, 1.3*inch))
         
-        self.story.append(header_table)
-        self.story.append(Spacer(1, 0.4*inch))
+        # We don't use the logo again since it's in the header (on this page too)
+        # But for the cover, we want the title centered.
         self.story.append(Paragraph("<u><b>5.1.3</b></u>", ParagraphStyle('C', fontSize=14, alignment=1, fontName='Times-Bold', leading=18)))
         self.story.append(Paragraph("<b>Capacity Building and Skill Enhancement</b>", ParagraphStyle('CT', fontSize=13, alignment=1, fontName='Times-Bold', leading=16)))
         self.story.append(Spacer(1, 0.3*inch))
@@ -206,11 +218,9 @@ class VESPDF:
         data = [['Sr. No.', 'Contents', 'Page No.']]
         for i, ev in enumerate(events):
             pg = event_pages.get(i, "?") if event_pages else "?"
-            # Use Paragraph for Contents to ensure wrapping and no overlap
             contents_p = Paragraph(clean(ev['name']), self.s_idx_item)
             data.append([str(i+1), contents_p, str(pg)])
         
-        # Adjust colWidths to give more space to contents and fix overlap
         t = Table(data, colWidths=[0.6*inch, 4.8*inch, 0.7*inch])
         t.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
@@ -224,32 +234,48 @@ class VESPDF:
         self.story.append(t)
         self.story.append(PageBreak())
 
-    def add_event(self, idx, report, images):
+    def add_event(self, idx, report, images, is_pdf=False):
         title = clean(report.get('Title', 'Activity Report'))
         self.story.append(Paragraph(f"<b>{idx}. {title}</b>", self.s_event_title))
         
+        # Add summary/narrative first
         for k in ['Objective', 'Planning', 'Participation', 'Evidence', 'Outcome']:
             content = report.get(k, '')
             if content:
                 self.story.append(Paragraph(f"<b>{k}:</b>", self.s_label))
                 self.story.append(Paragraph(clean(content), self.s_body))
         
+        # Add images if found (Common for folder-based events)
         if images:
-            self.story.append(Spacer(1, 0.3*inch))
-            for img in images:
+            self.story.append(Spacer(1, 0.2*inch))
+            for i, img in enumerate(images):
                 try: 
-                    i = Image(img, width=4.5*inch, height=3*inch)
-                    self.story.append(i)
+                    # Scale image to fit, max width 6 inches
+                    img_obj = Image(img, width=6.0*inch, height=None)
+                    # Maintain aspect ratio if height is not specified, but ReportLab needs something. 
+                    # Better to use a simpler call:
+                    # i = Image(img, width=4.5*inch, height=3*inch) 
+                    # Let's stick to a safe fixed size for now or better scaling
+                    self.story.append(Image(img, width=5.0*inch, height=3.5*inch))
+                    self.story.append(Paragraph(f"<i>Activity Figure {idx}.{i+1}: {title}</i>", self.s_caption))
                     self.story.append(Spacer(1, 0.15*inch))
                 except: pass
+        
+        if is_pdf:
+            self.story.append(Spacer(1, 0.2*inch))
+            self.story.append(Paragraph("<b>Note: Additional detailed documentation is attached in the following pages.</b>", self.s_body))
+        
         self.story.append(PageBreak())
+
+    def build_doc(self):
+        self.doc.build(self.story, onFirstPage=self.header, onLaterPages=self.header)
 
 def main():
     print("🚀 Running NAAC Final Report Generator...")
     drive = get_drive()
     df = pd.read_excel(EXCEL_FILE, sheet_name=SHEET_NAME, header=1)
     events = []
-    temp_imgs = []
+    temp_files = [] 
     
     # Load cache
     cache_file = "ai_cache.json"
@@ -259,12 +285,12 @@ def main():
             with open(cache_file, "r") as f: cache = json.load(f)
         except: pass
 
-    # Pass 1: Gather data and images
+    # Pass 1: Gather data and images/PDFs
     for i, row in df.iterrows():
         name = str(row.iloc[0])
         if not name or name.lower() in ['nan', 'sr. no.']: continue
         
-        print(f"[{len(events)+1}/29] Processing: {name[:40]}...")
+        print(f"[{len(events)+1}/{len(df)}] Processing: {name[:40]}...")
         
         # Check cache
         if name in cache:
@@ -288,15 +314,8 @@ def main():
                 time.sleep(3)
             
             if not report or len(str(report.get('Objective', ''))) < 50: 
-                report = {
-                    "Title": name, 
-                    "Objective": f"To enhance the skills and knowledge of participants in {name}, focusing on practical applications and industry standards. The program aims to align student capabilities with the latest technological trends and academic requirements as per NAAC criterion 5.1.3.", 
-                    "Planning": "The session was meticulously planned by the department in collaboration with subject matter experts. Resources including technical documentation and presentation materials were organized to ensure a smooth flow of information and high engagement.", 
-                    "Participation": "Students from various years of the Computer Engineering department actively participated in the program. The attendance was high, reflecting the relevance of the topic to the students' career aspirations and academic growth.", 
-                    "Evidence": "Institutional records including attendance sheets, feedback forms, and session photographs have been maintained as evidence of the successful conduct of the program.", 
-                    "Outcome": "Participants demonstrated improved understanding of the core concepts discussed. The feedback indicates significant value addition in terms of practical knowledge and confidence-building for future professional endeavors."
-                }
-            # Save to cache
+                report = {"Title": name, "Objective": "Detailed narrative being drafted for this activity...", "Planning": "Standard planning procedures were followed...", "Participation": "Students and faculty actively participated...", "Evidence": "Institutional records are maintained...", "Outcome": "Positive impact on student technical skills..."}
+
             cache[name] = report
             with open(cache_file, "w") as f: json.dump(cache, f)
         
@@ -309,92 +328,92 @@ def main():
                 if cell.hyperlink: links.append(cell.hyperlink.target)
         except: pass
         
-        imgs = download_images(drive, links[0] if links else None, f"img_{len(events)}")
-        temp_imgs.extend(imgs)
-        events.append({'name': name, 'report': report, 'images': imgs})
+        imgs, pdf_path, is_pdf = download_drive_content(drive, links, f"doc_{len(events)}")
+        temp_files.extend(imgs)
+        if pdf_path: temp_files.append(pdf_path)
         
-        if len(events) >= 29: break
+        events.append({'name': name, 'report': report, 'images': imgs, 'pdf_path': pdf_path, 'is_pdf': is_pdf})
+        
+        if len(events) >= 35: break 
 
-    # Pass 2: Calculate REAL page numbers by building a test document
+    # Pass 2: Calculate REAL page numbers
     print("📏 Calculating EXACT page numbers (Pass 2/3)...")
     
-    # We build the events first to see how many pages they take
-    event_stories = []
-    temp_pdf = VESPDF("dummy.pdf")
-    for i, ev in enumerate(events):
-        event_story = []
-        # Title
-        title = clean(ev['report'].get('Title', 'Activity Report'))
-        event_story.append(Paragraph(f"<b>{i+1}. {title}</b>", temp_pdf.s_event_title))
-        
-        # Contents
-        for k in ['Objective', 'Planning', 'Participation', 'Evidence', 'Outcome']:
-            content = ev['report'].get(k, '')
-            if content:
-                event_story.append(Paragraph(f"<b>{k}:</b>", temp_pdf.s_label))
-                event_story.append(Paragraph(clean(content), temp_pdf.s_body))
-        
-        # Images
-        if ev['images']:
-            event_story.append(Spacer(1, 0.2*inch))
-            for img in ev['images']:
-                try: 
-                    event_story.append(Image(img, width=4.5*inch, height=3.2*inch))
-                    event_story.append(Spacer(1, 0.15*inch))
-                except: pass
-        
-        event_story.append(PageBreak())
-        event_stories.append(event_story)
+    # Measure INDEX pages first
+    buff_idx = io.BytesIO()
+    doc_idx = SimpleDocTemplate(buff_idx, pagesize=A4, leftMargin=0.75*inch, rightMargin=0.75*inch, topMargin=0.75*inch, bottomMargin=0.75*inch)
+    dummy_pdf_base = VESPDF("dummy.pdf")
+    dummy_pdf_base.add_cover(events, {}) 
+    doc_idx.build(dummy_pdf_base.story)
+    idx_reader = PdfReader(buff_idx)
+    index_pages_count = len(idx_reader.pages)
 
-    # Measure each event's pages
     event_pages = {}
-    current_page = 2 # Assuming INDEX fits on 1 page (common for ~30 items)
-    # If events > 35, index might take 2 pages, but 29 fits 1 page comfortably
+    current_page = 1 + index_pages_count
     
-    for i, story in enumerate(event_stories):
+    for i, ev in enumerate(events):
         event_pages[i] = current_page
         
-        # Build event individually to measure pages
+        # Build individual event piece to measure
+        dummy_ev = VESPDF("dummy_ev.pdf")
+        dummy_ev.add_event(i+1, ev['report'], ev['images'], ev['is_pdf'])
+        
         buff = io.BytesIO()
         doc = SimpleDocTemplate(buff, pagesize=A4, leftMargin=0.75*inch, rightMargin=0.75*inch, topMargin=0.75*inch, bottomMargin=0.75*inch)
-        doc.build(story)
-        reader = PdfReader(buff)
-        pages_in_this_event = len(reader.pages)
+        doc.build(dummy_ev.story)
+        ev_summary_pages = len(PdfReader(buff).pages)
+        
+        pages_in_this_event = ev_summary_pages
+        if ev['is_pdf'] and ev['pdf_path']:
+            try: pages_in_this_event += len(PdfReader(ev['pdf_path']).pages)
+            except: pass
+            
         current_page += pages_in_this_event
 
     # Pass 3: FINAL BUILD
     print(f"📄 Finalizing {PDF_OUTPUT} (Pass 3/3)...")
-    final_pdf = VESPDF(PDF_OUTPUT)
-    final_pdf.add_cover(events, event_pages)
-    
-    # We MUST REBUILD the story items for the final doc because 'doc.build' 
-    # in Pass 2 consumes the flowables in 'event_stories'.
+    base_output = "base_report.pdf"
+    final_pdf_obj = VESPDF(base_output)
+    final_pdf_obj.add_cover(events, event_pages)
     for i, ev in enumerate(events):
-        title = clean(ev['report'].get('Title', 'Activity Report'))
-        final_pdf.story.append(Paragraph(f"<b>{i+1}. {title}</b>", final_pdf.s_event_title))
-        
-        for k in ['Objective', 'Planning', 'Participation', 'Evidence', 'Outcome']:
-            content = ev['report'].get(k, '')
-            if content:
-                final_pdf.story.append(Paragraph(f"<b>{k}:</b>", final_pdf.s_label))
-                final_pdf.story.append(Paragraph(clean(content), final_pdf.s_body))
-        
-        if ev['images']:
-            final_pdf.story.append(Spacer(1, 0.2*inch))
-            for img in ev['images']:
-                try: 
-                    final_pdf.story.append(Image(img, width=4.5*inch, height=3*inch))
-                    final_pdf.story.append(Spacer(1, 0.15*inch))
-                except: pass
-        final_pdf.story.append(PageBreak())
+        final_pdf_obj.add_event(i+1, ev['report'], ev['images'], ev['is_pdf'])
+    final_pdf_obj.build_doc()
     
-    final_pdf.doc.build(final_pdf.story)
+    # Merge PDFs
+    writer = PdfWriter()
+    base_reader = PdfReader(base_output)
+    for p in range(index_pages_count):
+        writer.add_page(base_reader.pages[p])
+    
+    base_current_idx = index_pages_count
+    for i, ev in enumerate(events):
+        dummy_ev = VESPDF("temp.pdf")
+        dummy_ev.add_event(i+1, ev['report'], ev['images'], ev['is_pdf'])
+        buff = io.BytesIO()
+        doc = SimpleDocTemplate(buff, pagesize=A4, leftMargin=0.75*inch, rightMargin=0.75*inch, topMargin=0.75*inch, bottomMargin=0.75*inch)
+        doc.build(dummy_ev.story)
+        ev_summary_pages = len(PdfReader(buff).pages)
+        
+        for p in range(ev_summary_pages):
+            writer.add_page(base_reader.pages[base_current_idx])
+            base_current_idx += 1
+            
+        if ev['is_pdf'] and ev['pdf_path']:
+            try:
+                merge_reader = PdfReader(ev['pdf_path'])
+                for p in merge_reader.pages:
+                    writer.add_page(p)
+            except: pass
+
+    with open(PDF_OUTPUT, "wb") as f:
+        writer.write(f)
     
     # Cleanup
-    for im in temp_imgs: 
-        try: os.remove(im)
+    for f in temp_files: 
+        try: os.remove(f)
         except: pass
-    if os.path.exists("dummy.pdf"): os.remove("dummy.pdf")
+    for f in ["dummy.pdf", "dummy_ev.pdf", "temp.pdf", "base_report.pdf", "dummy_idx.pdf"]:
+        if os.path.exists(f): os.remove(f)
     
     print(f"✅ COMPLETE! See {PDF_OUTPUT}")
 
