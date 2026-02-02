@@ -14,7 +14,7 @@ from typing import Optional, List
 from agents import app as langgraph_app
 from fpdf import FPDF
 from excel_parser import get_available_criteria
-from report_compiler_v4 import compile_enhanced_report
+from ves_report_compiler import compile_ves_report
 
 # Initialize FastAPI
 app = FastAPI(
@@ -173,14 +173,19 @@ async def upload_excel(file: UploadFile = File(...)):
     Upload an Excel file containing NAAC criterion data.
     Returns the filename and available criteria sheets.
     """
+    import time
+    start = time.time()
     try:
         # Save uploaded file
+        print(f"📤 Receiving file: {file.filename}")
         file_path = os.path.join(UPLOAD_DIR, file.filename)
         with open(file_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
+        print(f"   ✓ File saved ({time.time()-start:.2f}s)")
         
         # Get available criteria from the Excel
         criteria = get_available_criteria(file_path)
+        print(f"   ✓ Criteria extracted: {criteria} ({time.time()-start:.2f}s)")
         
         return {
             "success": True,
@@ -195,11 +200,12 @@ async def upload_excel(file: UploadFile = File(...)):
 @app.post("/api/compile-report", response_model=CompileResponse)
 async def compile_report(request: CompileRequest):
     """
-    Compile an enhanced NAAC report with:
-    - Clickable Table of Contents
-    - AI-generated narratives per event
-    - Image thumbnails with detailed captions
-    - PDF bookmarks for navigation
+    Compile a VES-format NAAC report with:
+    - VES logo header on all pages
+    - GROQ AI-generated narratives per event
+    - Image thumbnails with captions
+    - Clickable Table of Contents with page numbers
+    - PDF merging with attached documents
     """
     try:
         excel_path = os.path.join(UPLOAD_DIR, request.excel_filename)
@@ -210,16 +216,21 @@ async def compile_report(request: CompileRequest):
                 error=f"Excel file not found: {request.excel_filename}"
             )
         
-        print(f"\n🚀 API: Starting enhanced report compilation")
+        print(f"\n🚀 API: Starting VES-format report compilation")
         print(f"   Excel: {request.excel_filename}")
         print(f"   Criterion: {request.criterion}")
         
-        # Run the enhanced compiler
-        result = compile_enhanced_report(
+        # Generate output filename
+        safe_criterion = request.criterion.replace(".", "_")
+        output_filename = f"NAAC_VES_Report_{safe_criterion}.pdf"
+        output_path = os.path.join(".", output_filename)
+
+        
+        # Run the VES report compiler (GROQ-based)
+        result = compile_ves_report(
             excel_path=excel_path,
             criterion=request.criterion,
-            output_dir=".",
-            generate_captions=request.generate_captions
+            output_path=output_path
         )
         
         if result["success"]:
