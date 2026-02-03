@@ -269,11 +269,28 @@ def compile_ves_report(excel_path: str, criterion: str, output_path: str) -> Dic
 
     # Pass 1: Gather data
     total_rows = len(df)
+    
+    # Simple column detection: use column 0 unless it's "Year"
+    name_col_idx = 0
+    first_col = str(df.columns[0]).strip().lower()
+    if first_col == 'year':
+        name_col_idx = 1  # Use second column if first is Year
+    
+    print(f"   📋 Using column {name_col_idx} for event names: '{df.columns[name_col_idx]}'")
+    
+    # Common invalid values to skip (headers, etc.)
+    skip_values = ['nan', 'sr. no.', 'sr no', 'name of the activity', 'activity']
+    
     for i, row in df.iterrows():
-        name = str(row.iloc[0])
-        if not name or name.lower() in ['nan', 'sr. no.', 'name of the activity']: continue
+        name = str(row.iloc[name_col_idx]).strip()
+        # Skip invalid rows
+        if not name or name.lower() in skip_values:
+            continue
+        # Skip very short names (likely headers or codes)
+        if len(name) < 3:
+            continue
         
-        print(f"[{len(events)+1}/{total_rows}] Processing: {name[:40]}...")
+        print(f"[{len(events)+1}/{total_rows}] Processing: {name[:50]}...")
         
         # Check cache
         cache_key = f"{criterion}_{name}"
@@ -291,6 +308,8 @@ def compile_ves_report(excel_path: str, criterion: str, output_path: str) -> Dic
             for attempt in range(3):
                 report = generate_narrative(row_summary)
                 if report and len(str(report.get('Objective', ''))) > 100:
+                    # FORCE the title to be the actual event name from Excel
+                    report['Title'] = name
                     print(f"      ✓ AI narrative generated")
                     break
                 print(f"      ⚠️ AI attempt {attempt+1} insufficient, retrying...")
@@ -299,6 +318,9 @@ def compile_ves_report(excel_path: str, criterion: str, output_path: str) -> Dic
             if not report or len(str(report.get('Objective', ''))) < 50: 
                 print("      ⚠️ Using fallback narrative")
                 report = {"Title": name, "Objective": "Details pending...", "Planning": "Standard planning...", "Participation": "Students participated...", "Evidence": "Records maintained...", "Outcome": "Positive impact..."}
+            else:
+                # Ensure title is always the actual event name
+                report['Title'] = name
 
             cache[cache_key] = report
             with open(cache_file, "w") as f: json.dump(cache, f)
