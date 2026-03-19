@@ -1,6 +1,8 @@
 """
-NAAC FINAL REPORT GENERATOR - GROQ + VES FORMAT (AUTOMATED)
+NAAC VES Report Compiler for FastAPI Backend
+Uses the same VESPDF engine from naac_groq_report.py with Groq AI + VES branding.
 """
+
 import os
 import sys
 import time
@@ -11,7 +13,9 @@ import pandas as pd
 from typing import List, Dict, Optional, Tuple
 from dotenv import load_dotenv
 
+# Load .env from current directory
 load_dotenv()
+PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -32,9 +36,6 @@ except ImportError as e:
     print(f"Missing dependency: {e}")
     sys.exit(1)
 
-EXCEL_FILE = "data/Criteria 5.1.3 CMPN Data 2024-25.xlsx"
-SHEET_NAME = "5.1.3"
-PDF_OUTPUT = "NAAC_VES_FINAL_REPORT.pdf"
 VES_RED = colors.HexColor('#8B0000')
 
 class ReportSections(BaseModel):
@@ -52,54 +53,44 @@ def clean(text: str) -> str:
 def get_drive():
     try:
         gauth = GoogleAuth()
-        # TRY TO USE LOCAL AUTH WITHOUT BROWSER IF POSSIBLE
-        gauth.LoadCredentialsFile("mycreds.txt")
+        creds_file = "mycreds.txt"  # Now in backend folder
+        gauth.LoadCredentialsFile(creds_file)
         if gauth.credentials is None:
-            # First time auth
             gauth.LocalWebserverAuth()
         elif gauth.access_token_expired:
             try:
                 gauth.Refresh()
             except:
-                # If refresh fails, redo auth
                 gauth.LocalWebserverAuth()
         else:
             gauth.Authorize()
-        gauth.SaveCredentialsFile("mycreds.txt")
+        gauth.SaveCredentialsFile(creds_file)
         return GoogleDrive(gauth)
     except Exception as e:
         print(f"Drive Auth Error: {e}")
         return None
 
 def download_drive_content(drive, urls, folder_prefix):
-    """
-    Tries to find images and PDFs from a list of URLs.
-    """
     images = []
     pdf_path = None
     if not drive or not urls: return images, None, False
     
-    # Process each link found in the row
     for link_idx, url in enumerate(urls):
         if not url or not isinstance(url, str): continue
         m = re.search(r'([a-zA-Z0-9_-]{25,})', url)
         if not m: continue
         fid = m.group(1)
         
-        print(f"      🔍 Checking Drive Link {link_idx+1}: {fid[:10]}...")
         try:
             f_meta = drive.CreateFile({'id': fid})
             f_meta.FetchMetadata()
             
-            # If it's a direct PDF
             if f_meta['mimeType'] == 'application/pdf':
                 if not pdf_path:
                     pdf_path = f"{folder_prefix}_doc_{link_idx}.pdf"
-                    print(f"      📥 Downloading PDF: {f_meta['title']}")
                     f_meta.GetContentFile(pdf_path)
                 continue
 
-            # If it's a folder, list its contents
             query = f"'{fid}' in parents and trashed=false"
             children = drive.ListFile({'q': query}).GetList()
             
@@ -107,16 +98,14 @@ def download_drive_content(drive, urls, folder_prefix):
                 mtype = child['mimeType']
                 if 'image/' in mtype and len(images) < 4:
                     fname = f"{folder_prefix}_img_{link_idx}_{len(images)}.jpg"
-                    print(f"      📸 Downloading Image: {child['title']}")
                     child.GetContentFile(fname)
                     images.append(fname)
                 elif mtype == 'application/pdf' and not pdf_path:
                     pdf_path = f"{folder_prefix}_doc_{link_idx}.pdf"
-                    print(f"      📥 Downloading PDF (from folder): {child['title']}")
                     child.GetContentFile(pdf_path)
                     
         except Exception as e:
-            print(f"      ⚠️ Drive Link Error: {e}")
+            print(f"Drive Link Error: {e}")
             
     is_pdf = pdf_path is not None
     return images, pdf_path, is_pdf
@@ -149,12 +138,12 @@ Provide detailed responses for:
         chain = prompt | llm | parser
         return chain.invoke({"data": row_data})
     except Exception as e:
-        print(f"      AI Exception: {e}")
+        print(f"AI Exception: {e}")
         return None
+
 
 class VESPDF:
     def __init__(self, filename):
-        # Increased topMargin to accommodate the logo header comfortably
         self.doc = SimpleDocTemplate(filename, pagesize=A4, 
                                    leftMargin=0.75*inch, rightMargin=0.75*inch, 
                                    topMargin=2.8*inch, bottomMargin=0.75*inch)
@@ -163,24 +152,11 @@ class VESPDF:
         self._setup_styles()
 
     def _setup_styles(self):
-        # Header - Big Red
         self.s_header = ParagraphStyle(
-            'H', 
-            fontSize=22, 
-            textColor=VES_RED, 
-            alignment=1, 
-            fontName='Times-Bold',
-            leading=26
+            'H', fontSize=22, textColor=VES_RED, alignment=1, fontName='Times-Bold', leading=26
         )
-        # Event Title
         self.s_event_title = ParagraphStyle(
-            'ET', 
-            fontSize=18, 
-            textColor=VES_RED, 
-            fontName='Times-Bold', 
-            spaceBefore=12,
-            spaceAfter=12,
-            leading=22
+            'ET', fontSize=18, textColor=VES_RED, fontName='Times-Bold', spaceBefore=12, spaceAfter=12, leading=22
         )
         self.s_sub = ParagraphStyle('S', fontSize=18, alignment=1, fontName='Times-Roman', underline=True, leading=22)
         self.s_aff = ParagraphStyle('A', fontSize=9, alignment=1, leading=11)
@@ -197,19 +173,14 @@ class VESPDF:
 
     def header(self, canvas, doc):
         canvas.saveState()
-        if os.path.exists("ves_logo.png"):
-            # Centering 6.5in banner: x = (8.27 - 6.5)/2 = 0.885
-            # Lowering Y significantly to A4[1] - 2.6 to avoid any top cut-off
-            canvas.drawImage("ves_logo.png", 0.885*inch, A4[1] - 2.6*inch, width=6.5*inch, preserveAspectRatio=True, mask='auto')
+        logo_path = "ves_logo.png"  # Now in backend folder
+        if os.path.exists(logo_path):
+            canvas.drawImage(logo_path, 0.885*inch, A4[1] - 2.6*inch, width=6.5*inch, preserveAspectRatio=True, mask='auto')
         canvas.restoreState()
 
-    def add_cover(self, events, event_pages=None):
-        # The cover doesn't get the header, so we just add spacer for where header would be
+    def add_cover(self, criterion, events, event_pages=None):
         self.story.append(Spacer(1, 1.3*inch))
-        
-        # We don't use the logo again since it's in the header (on this page too)
-        # But for the cover, we want the title centered.
-        self.story.append(Paragraph("<u><b>5.1.3</b></u>", ParagraphStyle('C', fontSize=14, alignment=1, fontName='Times-Bold', leading=18)))
+        self.story.append(Paragraph(f"<u><b>{criterion}</b></u>", ParagraphStyle('C', fontSize=14, alignment=1, fontName='Times-Bold', leading=18)))
         self.story.append(Paragraph("<b>Capacity Building and Skill Enhancement</b>", ParagraphStyle('CT', fontSize=13, alignment=1, fontName='Times-Bold', leading=16)))
         self.story.append(Spacer(1, 0.3*inch))
         self.story.append(Paragraph("<u><b>INDEX</b></u>", ParagraphStyle('I', fontSize=14, alignment=1, fontName='Times-Bold', leading=18)))
@@ -238,24 +209,16 @@ class VESPDF:
         title = clean(report.get('Title', 'Activity Report'))
         self.story.append(Paragraph(f"<b>{idx}. {title}</b>", self.s_event_title))
         
-        # Add summary/narrative first
         for k in ['Objective', 'Planning', 'Participation', 'Evidence', 'Outcome']:
             content = report.get(k, '')
             if content:
                 self.story.append(Paragraph(f"<b>{k}:</b>", self.s_label))
                 self.story.append(Paragraph(clean(content), self.s_body))
         
-        # Add images if found (Common for folder-based events)
         if images:
             self.story.append(Spacer(1, 0.2*inch))
             for i, img in enumerate(images):
                 try: 
-                    # Scale image to fit, max width 6 inches
-                    img_obj = Image(img, width=6.0*inch, height=None)
-                    # Maintain aspect ratio if height is not specified, but ReportLab needs something. 
-                    # Better to use a simpler call:
-                    # i = Image(img, width=4.5*inch, height=3*inch) 
-                    # Let's stick to a safe fixed size for now or better scaling
                     self.story.append(Image(img, width=5.0*inch, height=3.5*inch))
                     self.story.append(Paragraph(f"<i>Activity Figure {idx}.{i+1}: {title}</i>", self.s_caption))
                     self.story.append(Spacer(1, 0.15*inch))
@@ -270,14 +233,33 @@ class VESPDF:
     def build_doc(self):
         self.doc.build(self.story, onFirstPage=self.header, onLaterPages=self.header)
 
-def main():
-    print("🚀 Running NAAC Final Report Generator...")
-    drive = get_drive()
-    df = pd.read_excel(EXCEL_FILE, sheet_name=SHEET_NAME, header=1)
-    events = []
-    temp_files = [] 
+
+def compile_ves_report(excel_path: str, criterion: str, output_path: str) -> Dict:
+    """
+    Compiles a VES-branded report using Groq AI and the refined 3-pass system.
+    Works for ANY NAAC criterion as long as the Excel follows the standard format.
+    """
+    print(f"🚀 Running VES Report Compiler for {criterion}...")
     
-    # Load cache
+    result = {
+        "success": False,
+        "output_path": None,
+        "events_processed": 0,
+        "images_added": 0,
+        "pages": 0,
+        "error": None
+    }
+    
+    try:
+        drive = get_drive()
+        df = pd.read_excel(excel_path, sheet_name=criterion, header=1)
+    except Exception as e:
+        result["error"] = f"Failed to read Excel or sheet '{criterion}': {e}"
+        return result
+        
+    events = []
+    temp_files = []
+    
     cache_file = "ai_cache.json"
     cache = {}
     if os.path.exists(cache_file):
@@ -285,65 +267,98 @@ def main():
             with open(cache_file, "r") as f: cache = json.load(f)
         except: pass
 
-    # Pass 1: Gather data and images/PDFs
+    # Pass 1: Gather data
+    total_rows = len(df)
+    
+    # Simple column detection: use column 0 unless it's "Year"
+    name_col_idx = 0
+    first_col = str(df.columns[0]).strip().lower()
+    if first_col == 'year':
+        name_col_idx = 1  # Use second column if first is Year
+    
+    print(f"   📋 Using column {name_col_idx} for event names: '{df.columns[name_col_idx]}'")
+    
+    # Common invalid values to skip (headers, etc.)
+    skip_values = ['nan', 'sr. no.', 'sr no', 'name of the activity', 'activity']
+    
     for i, row in df.iterrows():
-        name = str(row.iloc[0])
-        if not name or name.lower() in ['nan', 'sr. no.']: continue
+        name = str(row.iloc[name_col_idx]).strip()
+        # Skip invalid rows
+        if not name or name.lower() in skip_values:
+            continue
+        # Skip very short names (likely headers or codes)
+        if len(name) < 3:
+            continue
         
-        print(f"[{len(events)+1}/{len(df)}] Processing: {name[:40]}...")
+        print(f"[{len(events)+1}/{total_rows}] Processing: {name[:50]}...")
         
         # Check cache
-        if name in cache:
+        cache_key = f"{criterion}_{name}"
+        if cache_key in cache:
             print("      ✓ Using cached narrative")
-            report = cache[name]
+            report = cache[cache_key]
         else:
-            # Better data summary for AI
             relevant_info = []
             for col, val in row.items():
                 if pd.notna(val) and str(val).strip() != "" and "Unnamed" not in str(col):
                     relevant_info.append(f"{col}: {val}")
             row_summary = "\n".join(relevant_info)
             
-            # Retry logic for Groq
             report = None
             for attempt in range(3):
                 report = generate_narrative(row_summary)
                 if report and len(str(report.get('Objective', ''))) > 100:
+                    # FORCE the title to be the actual event name from Excel
+                    report['Title'] = name
+                    print(f"      ✓ AI narrative generated")
                     break
                 print(f"      ⚠️ AI attempt {attempt+1} insufficient, retrying...")
-                time.sleep(3)
+                time.sleep(2)
             
             if not report or len(str(report.get('Objective', ''))) < 50: 
-                report = {"Title": name, "Objective": "Detailed narrative being drafted for this activity...", "Planning": "Standard planning procedures were followed...", "Participation": "Students and faculty actively participated...", "Evidence": "Institutional records are maintained...", "Outcome": "Positive impact on student technical skills..."}
+                print("      ⚠️ Using fallback narrative")
+                report = {"Title": name, "Objective": "Details pending...", "Planning": "Standard planning...", "Participation": "Students participated...", "Evidence": "Records maintained...", "Outcome": "Positive impact..."}
+            else:
+                # Ensure title is always the actual event name
+                report['Title'] = name
 
-            cache[name] = report
+            cache[cache_key] = report
             with open(cache_file, "w") as f: json.dump(cache, f)
         
+        # Extract hyperlinks
         links = []
         try:
-            wb = load_workbook(EXCEL_FILE, data_only=False)
-            ws = wb[SHEET_NAME]
-            # Find hyperlinks in the current row
+            wb = load_workbook(excel_path, data_only=False)
+            ws = wb[criterion]
             for cell in ws[i+3]: 
                 if cell.hyperlink: links.append(cell.hyperlink.target)
         except: pass
         
+        if links:
+            print(f"      🔍 Checking {len(links)} Drive link(s)...")
         imgs, pdf_path, is_pdf = download_drive_content(drive, links, f"doc_{len(events)}")
+        if imgs:
+            print(f"      📸 Downloaded {len(imgs)} image(s)")
+        if pdf_path:
+            print(f"      📥 Downloaded PDF")
         temp_files.extend(imgs)
         if pdf_path: temp_files.append(pdf_path)
+        result["images_added"] += len(imgs)
         
         events.append({'name': name, 'report': report, 'images': imgs, 'pdf_path': pdf_path, 'is_pdf': is_pdf})
+        result["events_processed"] += 1
         
-        if len(events) >= 35: break 
+        if len(events) >= 35: break  # Full report with all events
 
-    # Pass 2: Calculate REAL page numbers
-    print("📏 Calculating EXACT page numbers (Pass 2/3)...")
-    
-    # Measure INDEX pages first
+    if not events:
+        result["error"] = "No events found in the Excel sheet."
+        return result
+
+    # Pass 2: Calculate page numbers
     buff_idx = io.BytesIO()
     doc_idx = SimpleDocTemplate(buff_idx, pagesize=A4, leftMargin=0.75*inch, rightMargin=0.75*inch, topMargin=0.75*inch, bottomMargin=0.75*inch)
     dummy_pdf_base = VESPDF("dummy.pdf")
-    dummy_pdf_base.add_cover(events, {}) 
+    dummy_pdf_base.add_cover(criterion, events, {}) 
     doc_idx.build(dummy_pdf_base.story)
     idx_reader = PdfReader(buff_idx)
     index_pages_count = len(idx_reader.pages)
@@ -354,7 +369,6 @@ def main():
     for i, ev in enumerate(events):
         event_pages[i] = current_page
         
-        # Build individual event piece to measure
         dummy_ev = VESPDF("dummy_ev.pdf")
         dummy_ev.add_event(i+1, ev['report'], ev['images'], ev['is_pdf'])
         
@@ -370,11 +384,10 @@ def main():
             
         current_page += pages_in_this_event
 
-    # Pass 3: FINAL BUILD
-    print(f"📄 Finalizing {PDF_OUTPUT} (Pass 3/3)...")
+    # Pass 3: Final build
     base_output = "base_report.pdf"
     final_pdf_obj = VESPDF(base_output)
-    final_pdf_obj.add_cover(events, event_pages)
+    final_pdf_obj.add_cover(criterion, events, event_pages)
     for i, ev in enumerate(events):
         final_pdf_obj.add_event(i+1, ev['report'], ev['images'], ev['is_pdf'])
     final_pdf_obj.build_doc()
@@ -405,16 +418,19 @@ def main():
                     writer.add_page(p)
             except: pass
 
-    with open(PDF_OUTPUT, "wb") as f:
+    with open(output_path, "wb") as f:
         writer.write(f)
     
-    # Cleanup
-    for f in temp_files: 
-        try: os.remove(f)
-        except: pass
-    for f in ["dummy.pdf", "dummy_ev.pdf", "temp.pdf", "base_report.pdf", "dummy_idx.pdf"]:
-        if os.path.exists(f): os.remove(f)
+    result["pages"] = len(writer.pages)
+    result["output_path"] = output_path
+    result["success"] = True
     
-    print(f"✅ COMPLETE! See {PDF_OUTPUT}")
-
-if __name__ == "__main__": main()
+    # Cleanup
+    for f_path in temp_files: 
+        try: os.remove(f_path)
+        except: pass
+    for f_path in ["dummy.pdf", "dummy_ev.pdf", "temp.pdf", "base_report.pdf"]:
+        if os.path.exists(f_path): os.remove(f_path)
+    
+    print(f"✅ Report generated: {output_path} ({result['pages']} pages)")
+    return result

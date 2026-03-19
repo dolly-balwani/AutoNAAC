@@ -1,105 +1,128 @@
-# NAAC Automation System
+# NAAC Report Generation System
 
-A comprehensive AI-powered system to automate the generation of NAAC (National Assessment and Accreditation Council) accreditation reports for educational institutions. This system integrates a React frontend, a FastAPI backend, and LangChain-based AI agents to process data, generate narratives, and compile professional PDF reports.
+An AI-powered system to automate NAAC accreditation report generation using multi-agent LLMs and Google Drive integration.
 
 ## Team
 Project developed by a team of 5 members during a Internship.
 
 ## 🚀 Features
 
-- **Automated Report Generation**: Uses LLMs (Google Gemma 2 via OpenRouter/Groq) to write professional academic narratives for NAAC criteria.
-- **Evidence Management**: Upload and organize evidence files (images, docs) linked to specific events.
-- **Excel Integration**: Parses standard NAAC data templates from Excel files.
-- **PDF & Word Export**: Generates formatted reports with Table of Contents, images, and proper academic styling.
-- **Dual Mode**:
-  - **Full Web App**: Modern React UI with real-time processing feedback.
-  - **Standalone Scripts**: Python scripts for quick, headless report generation.
+- **VES-Branded Reports**: Professional PDF reports with VES logo header on every page
+- **Groq AI Narratives**: Uses Llama 3.1 via Groq for fast, detailed academic writing
+- **Google Drive Integration**: Automatically fetches images and PDFs from Drive links in Excel
+- **PDF Merging**: Attaches supporting documents inline within the report
+- **Multi-Criterion Support**: Works with any NAAC criterion (5.1.3, 5.2.2, 5.3.3, etc.)
+- **Modern Web UI**: React frontend with guided report generation workflow
 
 ## 📂 Project Structure
 
-- **`frontend/`**: React 18 application with Vite. Handles UI for uploading files and viewing reports.
-- **`backend/`**: FastAPI server exposing LangGraph agents and report compilation logic.
-- **`data/`**: Directory for input Excel files.
-- **`uploads/`**: Directory where uploaded evidence and generated reports are stored.
-- **`naac_pdf_generator.py`**: Standalone script for generating reports from Excel + Google Drive links.
-- **`demo_report_generator.py`**: Offline demo script that generates a report without API keys (for testing/demo).
+```
+├── frontend/                   # React 18 + Vite application
+├── backend/                    # FastAPI server
+│   ├── server.py              # Main API endpoints
+│   ├── ves_report_compiler.py # VES-branded PDF generation engine
+│   ├── excel_parser.py        # Excel data extraction
+│   └── agents.py              # LangChain agents (optional)
+├── data/                       # Input Excel files
+├── naac_groq_report.py        # Standalone CLI report generator
+└── demo_report_generator.py   # Offline demo (no API keys needed)
+```
 
 ## 🛠️ Prerequisites
 
 - **Python**: 3.10+
-- **Node.js**: 18+ (for frontend)
+- **Node.js**: 18+
 - **API Keys**:
-  - `OPENROUTER_API_KEY` (for LLM access)
-  - Google Drive API credentials (optional, for Drive integration)
+  - `GROQ_API_KEY` - For AI narrative generation
+  - `GOOGLE_API_KEY` - For Gemini (optional)
+  - Google Drive credentials (`client_secrets.json`, `mycreds.txt`)
 
 ## 📦 Installation
 
-### 1. Backend Setup
+### 1. Clone & Install Dependencies
 
 ```bash
-# Install Python dependencies
+# Backend
 pip install -r backend/requirements.txt
+
+# Frontend
+cd frontend && npm install
 ```
 
-### 2. Frontend Setup
+### 2. Environment Setup
 
-```bash
-cd frontend
-# Install Node dependencies
-npm install
-```
-
-### 3. Environment Configuration
-
-Create a `.env` file in the root directory (or use the one in `backend/` if running server):
+Create `.env` in both root and `backend/` folders:
 
 ```ini
-OPENROUTER_API_KEY=your_key_here
-# Add other keys as needed
+GROQ_API_KEY=gsk_your_key_here
+GOOGLE_API_KEY=your_gemini_key_here
 ```
+
+### 3. Google Drive Setup
+
+Place these files in the root directory:
+- `client_secrets.json` - Google OAuth credentials
+- `mycreds.txt` - Generated after first auth (auto-created)
+- `ves_logo.png` - VES logo banner
 
 ## 🏃 Usage
 
-### Option A: specific Standalone Scripts (Quickest)
-
-To generate a report from a specific Excel file:
+### Option A: Standalone Script (Recommended for Quick Use)
 
 ```bash
-# Run the PDF generator
-python naac_pdf_generator.py
+# Generate full report from Excel
+python naac_groq_report.py
 ```
 
-To run a demo without API keys (uses templates):
+This generates `NAAC_VES_FINAL_REPORT.pdf` with all events, AI narratives, and merged PDFs.
+
+### Option B: Web Application
 
 ```bash
-# Run the demo generator
-python demo_report_generator.py
+# Terminal 1: Start Backend
+cd backend
+python -m uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+
+# Terminal 2: Start Frontend
+cd frontend
+npm run dev
 ```
 
-### Option B: Full Web Application
+Open http://localhost:5173 → Upload Excel → Select Criterion → Generate Report
 
-1. **Start the Backend Server**:
-   ```bash
-   python backend/server.py
-   ```
-   Server runs at `http://localhost:8000`.
+## 📋 Excel Format Requirements
 
-2. **Start the Frontend Development Server**:
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-   App runs at `http://localhost:5173`.
+Your Excel file should have sheets named with criterion codes (e.g., `5.1.3`) with columns:
 
-3. **Navigate to the App**: Open your browser to the frontend URL to upload files and generate reports.
+| Column | Content |
+|--------|---------|
+| A | Event Name |
+| B | Date |
+| C | Number of Students |
+| D | Agencies Involved |
+| E | Proof Link (Google Drive hyperlink) |
 
-## 📄 Documentation
+## 🔧 API Endpoints
 
-- [Frontend Documentation](frontend/README.md): Detailed guide on the React application structure and components.
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check |
+| `/api/upload-excel` | POST | Upload Excel, get available criteria |
+| `/api/compile-report` | POST | Generate VES-branded PDF report |
+| `/api/download/{filename}` | GET | Download generated report |
 
-## 🤝 Contribution
+## 📄 Output
 
-This project is developed for institutional internal use.
+Generated reports include:
+- VES logo header on every page
+- Clickable Table of Contents with page numbers
+- AI-generated narratives for each event (Objective, Planning, Participation, Evidence, Outcome)
+- Images from Google Drive with captions
+- Merged supporting PDFs inline
+
+## 🤝 Contributors
+
+Developed by VES Institute of Technology, Mumbai.
 
 ## 📝 License
 
