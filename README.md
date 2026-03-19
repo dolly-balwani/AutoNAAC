@@ -2,6 +2,9 @@
 
 A comprehensive AI-powered system to automate the generation of NAAC (National Assessment and Accreditation Council) accreditation reports for educational institutions. This system integrates a React frontend, a FastAPI backend, and LangChain-based AI agents to process data, generate narratives, and compile professional PDF reports.
 
+## Team
+Project developed by a team of 5 members during a Internship.
+
 ## 🚀 Features
 
 - **Automated Report Generation**: Uses LLMs (Google Gemma 2 via OpenRouter/Groq) to write professional academic narratives for NAAC criteria.
